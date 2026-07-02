@@ -246,6 +246,17 @@
   .farm-type{ font-size:11px; color: var(--text-secondary); background: var(--surface-2); padding: 2px 8px; border-radius: 20px; margin-left:auto; }
   .farm-row{ display:flex; justify-content:space-between; font-size:13px; padding: 6px 0; color: var(--text-secondary); }
   .farm-row b{ color: var(--text-primary); font-weight:600; font-variant-numeric: tabular-nums; }
+  .farm-parts{
+    margin: 4px 0 8px;
+    padding: 8px 10px;
+    background: var(--surface-2);
+    border-radius: 10px;
+    display:flex; flex-direction:column; gap:6px;
+  }
+  .farm-part{ display:flex; align-items:baseline; gap:8px; font-size:12px; }
+  .farm-part-sym{ color: var(--text-primary); font-weight:600; flex-shrink:0; }
+  .farm-part-amt{ color: var(--text-secondary); font-variant-numeric: tabular-nums; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .farm-part-usd{ color: var(--text-primary); font-variant-numeric: tabular-nums; margin-left:auto; flex-shrink:0; }
   .farm-apy{ color: var(--green); font-weight:600; }
   .farm-progress{ height:4px; background: var(--surface-2); border-radius:4px; margin-top:10px; overflow:hidden; }
   .farm-progress-fill{ height:100%; background: var(--grad); }
@@ -1220,6 +1231,17 @@ function renderFarms(farms) {
       </div>
       <div class="farm-row"><span>Wartość</span><b>${fmtUSD(f.principal)}</b></div>
       <div class="farm-row"><span>Udziały</span><b>${escapeHtml(f.shares)}</b></div>
+      ${Array.isArray(f.tokenParts) && f.tokenParts.length ? `
+        <div class="farm-parts">
+          ${f.tokenParts.map(part => `
+            <div class="farm-part">
+              <span class="farm-part-sym">${escapeHtml(part.symbol)}</span>
+              <span class="farm-part-amt">${formatTokenAmount(part.amount)}</span>
+              <span class="farm-part-usd">${fmtUSD(part.usd)}</span>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
       <div class="farm-row"><span>APY</span><b class="farm-apy">${f.apy === null ? '—' : `${f.apy}%`}</b></div>
       ${f.daysLeft > 0 ? `<div class="farm-row"><span>Koniec stakingu</span><b>za ${f.daysLeft} dni</b></div>` : ''}
       <div class="farm-progress"><div class="farm-progress-fill" style="width:${f.progress}%;"></div></div>
