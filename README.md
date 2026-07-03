@@ -1,85 +1,88 @@
 # PulseFolio
 
-A lightweight, single-file portfolio tracker for wallets on [PulseChain](https://pulsechain.com/). Paste one or more wallet addresses and get an instant overview of token balances, HEX stakes, and PulseX LP farm positions — all in the browser, no backend required.
+Track your portfolio value across **PulseChain** and **Ethereum** — no sign-up, no backend, no wallet address ever leaves your browser. Just paste an address (or a few) and the app queries the blockchain directly.
 
-![PulseChain](https://img.shields.io/badge/chain-PulseChain-8b3bff)
-![No backend](https://img.shields.io/badge/backend-none-35d68b)
-![License](https://img.shields.io/badge/license-MIT-informational)
+🔗 **Demo:** just open `index.html` in your browser — the whole app is a single HTML file.
 
-## Features
+![status](https://img.shields.io/badge/status-active-brightgreen) ![license](https://img.shields.io/badge/license-MIT-blue)
 
-- **Multi-wallet portfolio** — track one address or combine several into a single merged view.
-- **Token balances** — reads a curated whitelist of tokens directly via RPC using `Multicall3`, so it works even without an indexer/explorer API.
-- **Live pricing** — fetches USD prices and 24h change from [DexScreener](https://dexscreener.com/).
-- **HEX staking** — lists your active HEX stakes with progress and unlock countdown.
-- **PulseX farms** — reads your `MasterChef` LP farm positions, breaks each one down into its two underlying tokens, and calculates a live APY from on-chain reward emission and pool TVL.
-- **Flexible display** — toggle whether farm tokens are shown separately or merged into your token balances.
-- **Locally saved portfolio** — your address list is remembered in the browser so you don't have to re-enter it every visit.
-- **Zero backend** — a single `index.html` file; all reads happen client-side against the PulseChain RPC and public APIs.
+---
 
-## Getting started
+## ✨ Features
 
-No build step, no dependencies to install. Just open the file in a browser:
+- **Token balances** — native token (PLS / ETH) plus a list of popular tokens (WPLS, PLSX, HEX, USDC, USDT, DAI, WBTC and more), fetched in bulk via Multicall3 (with a fallback to individual RPC calls).
+- **USD pricing** — prices and 24h changes pulled from DexScreener, no API key required.
+- **Farms & staking** — automatic detection of:
+  - **HEX** stakes (principal, days remaining, progress),
+  - **PulseX MasterChef** LP farm positions, broken down into their underlying tokens.
+- **Multiple addresses at once** — add as many wallets as you like; the app sums balances into a single view.
+- **PulseChain, Ethereum, or both at once** — the network switcher next to the portfolio value lets you view PulseChain, Ethereum, or a combined "PulseChain + Ethereum" view, with badges showing which network each token/farm came from.
+- **Custom tokens** — missing a token from the list? Add it by contract address; it's saved locally in your browser.
+- **ATH Dream 🚀** — see what your portfolio would be worth at each token's historical all-time-high price.
+- **Multiplier ✖️** — recalculate your portfolio at any price multiplier (e.g. "what if prices went 10x").
+- **Farm display mode** — show farm tokens separately or merge them into the rest of your portfolio.
+- **Caching & instant preview** — the last loaded portfolio snapshot is saved to `localStorage` and shown instantly on your next visit (with a "Cached data — refreshing…" indicator) while fresh data loads in the background. If the refresh fails, the app doesn't wipe the view — it keeps showing the cached data along with an error notice.
+- **100% local** — wallet addresses, custom tokens, selected network, and the portfolio cache are stored only in your browser's `localStorage`. Nothing is sent to or stored on any server besides public blockchain RPCs/APIs.
+
+## 🚀 Quick start
+
+No build step, no dependencies to install.
 
 ```bash
-# clone the repo
-git clone https://github.com/<your-username>/pulsefolio.git
+git clone https://github.com/<your-user>/pulsefolio.git
 cd pulsefolio
+```
 
-# open it directly...
-open index.html          # macOS
-xdg-open index.html      # Linux
+Then just open `index.html` in your browser (double-click works fine), or spin up a lightweight static server, e.g.:
 
-# ...or serve it locally (recommended, some browsers restrict local file APIs)
+```bash
 python3 -m http.server 8000
 # then visit http://localhost:8000
 ```
 
-You can also just double-click `index.html` — it works as a static file with no server at all.
+Paste a wallet address (`0x…`), hit **Check** — done.
 
-## Usage
+## 🛠️ Tech stack
 
-1. Paste a PulseChain wallet address (`0x...`) into the address field.
-2. Add more addresses if you want to combine several wallets into one portfolio view.
-3. Click **Check** to load balances, prices, HEX stakes, and PulseX farm positions.
-4. Use the **Tokens** / **Farms & staking** tabs to switch views, and the **Farm tokens** toggle to show LP-derived tokens separately or merged into your main token list.
-5. Your address list is saved automatically so it's ready next time you open the page.
+- Plain **HTML + CSS + JavaScript** (no framework, no bundler)
+- [ethers.js v5](https://docs.ethers.org/v5/) — talking to RPCs (balances, ERC-20 contracts, MasterChef, HEX)
+- [Multicall3](https://www.multicall3.com/) — batching token balance calls into a single RPC request
+- [DexScreener API](https://docs.dexscreener.com/) — prices and 24h changes
+- [Tabler Icons](https://tabler.io/icons) — UI icons
+- Google Fonts (Space Grotesk + Inter)
 
-## Privacy
+Public RPCs used by default:
 
-Wallet addresses you enter are stored **only locally in your browser** (`localStorage`). They are never sent to, or stored on, any server — PulseFolio has no backend at all. Clearing your browser data (or using "Create new") removes them.
+| Network | RPC |
+|---|---|
+| PulseChain | `rpc.pulsechain.com`, `rpc.pulsechainstats.com` |
+| Ethereum | public RPC configured in the code |
 
-All balance/price lookups happen directly from your browser to the PulseChain RPC and to DexScreener's public API — no intermediary server sees your addresses.
+## 📁 Project structure
 
-## How it works
-
-- **Balances**: instead of relying on a block explorer API, PulseFolio batches `balanceOf` calls for a whitelist of known token contracts (`KNOWN_TOKENS`) through the `Multicall3` contract, in a single RPC round-trip.
-- **Prices**: token prices and 24h changes come from the DexScreener API, filtered to PulseChain pairs.
-- **HEX staking**: reads `stakeCount` / `stakeLists` / `currentDay` from the HEX contract to compute active stakes, progress, and days remaining.
-- **PulseX farms**: reads `userInfo` / `poolInfo` from the `MasterChef` contract for every pool, then values each LP position by splitting it into its two underlying tokens using on-chain reserves.
-- **Farm APY**: computed on-chain, not fetched from a third party. For each pool, PulseFolio reads the MasterChef's `incPerSecond` and `totalAllocPoint` to get that pool's share of INC emissions, prices it in USD, and divides by the pool's total value locked (the USD value of *all* LP tokens deposited in that pool, not just yours) to get an annualized rate.
-- **RPC fallback**: if the primary RPC endpoint fails, requests automatically retry against a fallback endpoint.
-
-## Adding tokens
-
-The token list is a manually curated whitelist (`KNOWN_TOKENS` in `index.html`) rather than an auto-discovered list, so it stays fast and predictable. To track an additional token, add an entry with its contract address, symbol, name, and decimals:
-
-```js
-{ address: '0x...', symbol: 'TOKEN', name: 'Token Name', decimals: 18 },
+```
+.
+├── index.html   # the entire app — HTML, CSS and JS in a single file
+└── README.md
 ```
 
-## Tech stack
+## 🔒 Privacy
 
-- Vanilla HTML / CSS / JavaScript — no framework, no build tools
-- [ethers.js v5](https://docs.ethers.org/v5/) for contract calls and formatting
-- [Multicall3](https://github.com/mds1/multicall) for batched on-chain reads
-- [DexScreener API](https://docs.dexscreener.com/) for token pricing
-- [Tabler Icons](https://tabler.io/icons) for UI icons
+- No accounts, no login, no backend.
+- Wallet addresses and manually added tokens are stored **only in your browser's `localStorage`** — never sent to or saved on any server.
+- The only network traffic is requests to public blockchain RPCs and to DexScreener for pricing.
 
-## Disclaimer
+## 🗺️ Possible roadmap
 
-PulseFolio is a read-only viewer. It never requests wallet signatures, private keys, or transaction approval — it only reads public on-chain data for the addresses you provide. Prices are sourced from third-party APIs and may be delayed or inaccurate; do not rely on this tool for financial decisions.
+- [ ] Additional EVM networks (e.g. BNB Chain, Base)
+- [ ] Export portfolio to CSV
+- [ ] Portfolio value chart over time
+- [ ] Price change notifications
 
-## License
+## 🤝 Contributing
 
-MIT
+Pull requests and issues are welcome. If you'd like to add support for a new token, farm, or network, open an issue describing it or go ahead and send a PR.
+
+## 📄 License
+
+Released under the [MIT](LICENSE) license.
