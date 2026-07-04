@@ -3114,12 +3114,20 @@
             switchNetwork(this.value);
         });
 
-        document.getElementById('networkPillBtn').addEventListener('click', function() {
+        /*document.getElementById('networkPillBtn').addEventListener('click', function() {
             // Cycles: PulseChain -> Ethereum -> PulseChain + Ethereum -> PulseChain ...
             if (combinedMode) {
                 switchNetwork('pulsechain');
             } else if (selectedNetwork === 'pulsechain') {
                 switchNetwork('ethereum');
+            } else {
+                setCombinedMode(true);
+            }
+        });*/
+        document.getElementById('networkPillBtn').addEventListener('click', function() {
+            // Przełączanie między trybem PulseChain (sam) a PulseChain + Ethereum
+            if (combinedMode) {
+                switchNetwork('pulsechain');
             } else {
                 setCombinedMode(true);
             }
