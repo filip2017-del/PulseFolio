@@ -1444,6 +1444,45 @@
             color: var(--text-primary);
         }
 
+        /* ---------- manual token merge toggle ---------- */
+        .manual-merge-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 10px 0 4px;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .manual-merge-label {
+            font-size: clamp(11px, 0.8vw, 13px);
+            color: var(--text-secondary);
+        }
+        .manual-merge-toggle {
+            display: flex;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 3px;
+            gap: 2px;
+        }
+        .mm-btn {
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: clamp(10px, 0.7vw, 12px);
+            font-weight: 600;
+            padding: clamp(5px, 0.6vw, 8px) clamp(10px, 1vw, 14px);
+            border-radius: 16px;
+            cursor: pointer;
+            font-family: 'Inter', sans-serif;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+        .mm-btn.active {
+            background: var(--surface-2);
+            color: var(--text-primary);
+        }
+
         /* ---------- farm card ---------- */
         .farm-card {
             background: var(--surface);
@@ -2020,6 +2059,14 @@
                 <button class="btn-grad" id="manualTokenCheckBtn" type="button">Check</button>
             </div>
             <div class="token-empty-hint">Use this for tokens you hold on an exchange (Binance, Coinbase…) or on a blockchain this app doesn't scan directly — enter the amount you hold and its live price gets tracked here alongside your wallet balances.</div>
+
+            <div class="manual-merge-row">
+                <span class="manual-merge-label">If a manual token matches one already in your portfolio</span>
+                <div class="manual-merge-toggle">
+                    <button class="mm-btn" data-mmmode="separate" type="button" title="Show manually added tokens as their own separate row">Keep separate</button>
+                    <button class="mm-btn" data-mmmode="merge" type="button" title="Add the manual amount on top of the matching on-chain token">Sum with matching token</button>
+                </div>
+            </div>
 
             <div class="manual-token-result" id="manualTokenResult">
                 <div class="mt-icon" id="mtIcon">?</div>
@@ -2625,6 +2672,7 @@
         const PORTFOLIO_CACHE_KEY = () => 'pulsefolio_portfolio_cache' + portfolioSuffix();
         const SORT_STORAGE_KEY = 'pulsefolio_sort_config';
         const MANUAL_TOKENS_STORAGE_KEY = () => 'pulsefolio_manual_tokens' + portfolioSuffix();
+        const MANUAL_MERGE_MODE_STORAGE_KEY = () => 'pulsefolio_manual_merge_mode' + portfolioSuffix();
         const COINGECKO_ICONS_CACHE_KEY = 'pulsefolio_coingecko_icons_cache';
 
         function saveAddressesToStorage(addresses) {
@@ -2821,6 +2869,25 @@
 
         let manualTokens = loadManualTokensFromStorage();
 
+        // 'separate' (default) = manually added tokens always get their own row with a "manual" badge.
+        // 'merge' = if the symbol already exists on-chain, the manual amount is summed into that row instead.
+        function loadManualMergeModeFromStorage() {
+            try {
+                const val = localStorage.getItem(MANUAL_MERGE_MODE_STORAGE_KEY());
+                return val === 'merge' ? 'merge' : 'separate';
+            } catch (err) { return 'separate'; }
+        }
+        function saveManualMergeModeToStorage(val) {
+            try { localStorage.setItem(MANUAL_MERGE_MODE_STORAGE_KEY(), val); } catch (err) { console.warn(err); }
+        }
+        let manualMergeMode = loadManualMergeModeFromStorage();
+
+        function syncManualMergeButtons() {
+            document.querySelectorAll('.mm-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mmmode === manualMergeMode);
+            });
+        }
+
         // CoinGecko API – search by symbol
         async function searchTokenOnCoingecko(symbol) {
             const query = symbol.trim().toLowerCase();
@@ -2927,37 +2994,35 @@
         function mergeManualTokensIntoPortfolio(portfolioData) {
             if (!manualTokens.length) return portfolioData;
 
-            const existingSymbols = new Set(portfolioData.tokens.map(t => t.symbol.toUpperCase()));
+            // Work on a shallow copy of on-chain tokens so summed ones can be mutated
+            // without touching the objects cached elsewhere.
+            const baseTokens = portfolioData.tokens.map(t => ({ ...t }));
             const manualTokenObjects = [];
 
             for (const mt of manualTokens) {
-                // If a token with the same symbol already exists (e.g., on-chain BTC), skip or merge?
-                // We'll add it as a separate entry with a "manual" flag.
                 const style = tokenStyle(mt.symbol);
                 const usd = mt.amount * mt.price;
                 const change = mt.change24h ?? null;
 
-                // Check if a token with the same symbol already exists in the portfolio
-                const existing = portfolioData.tokens.find(t => t.symbol.toUpperCase() === mt.symbol.toUpperCase() && !t
-                .manuallyAdded);
+                // Check if a non-manual token with the same symbol already exists in the portfolio
+                const existing = manualMergeMode === 'merge' ?
+                    baseTokens.find(t => t.symbol.toUpperCase() === mt.symbol.toUpperCase() && !t.manuallyAdded) :
+                    null;
+
                 if (existing) {
-                    // Merge: add amount and usd, but keep the on-chain data as primary
-                    // We'll add the manual amount as an additional entry with a "manual" flag
-                    // Or we can merge them - let's add as separate with a manual badge
-                    manualTokenObjects.push({
-                        symbol: mt.symbol.toUpperCase(),
-                        name: mt.name || mt.symbol.toUpperCase(),
-                        amount: formatTokenAmount(mt.amount),
-                        rawAmount: mt.amount,
-                        usd: usd,
-                        change: change,
-                        icon: resolveIcon(mt.symbol, mt.icon),
-                        address: `manual_${mt.coingeckoId}`,
-                        manuallyAdded: true,
-                        price: mt.price,
-                        noPrice: !mt.price || mt.price === 0,
-                        ...style,
-                    });
+                    // Sum mode: fold the manual amount into the matching on-chain token
+                    // instead of adding a separate row.
+                    const existingRaw = existing.rawAmount || 0;
+                    const newRaw = existingRaw + mt.amount;
+                    const newUsd = (existing.usd || 0) + usd;
+                    existing.rawAmount = newRaw;
+                    existing.amount = formatTokenAmount(newRaw);
+                    existing.usd = newUsd;
+                    existing.summedManual = true;
+                    if (existing.noPrice && mt.price) {
+                        existing.noPrice = false;
+                        existing.price = mt.price;
+                    }
                 } else {
                     manualTokenObjects.push({
                         symbol: mt.symbol.toUpperCase(),
@@ -2977,7 +3042,7 @@
             }
 
             // Merge into portfolioData.tokens
-            const allTokens = [...portfolioData.tokens, ...manualTokenObjects];
+            const allTokens = [...baseTokens, ...manualTokenObjects];
             // Sort by USD value
             allTokens.sort((a, b) => (b.usd || 0) - (a.usd || 0));
 
@@ -4316,7 +4381,8 @@
                 const athBadge = athMode && t.isAth ? '<span class="ath-badge" style="font-size:0.7em; padding:1px 5px;">ATH</span>' :
                     '';
                 const manualBadge = t.manuallyAdded ? '<span class="farm-badge" style="font-size:0.7em; padding:1px 5px; background:rgba(0,212,255,0.14); border-color:rgba(0,212,255,0.35); color:var(--cyan);">manual</span>' :
-                    '';
+                    (t.summedManual ? '<span class="farm-badge" style="font-size:0.7em; padding:1px 5px; background:rgba(0,212,255,0.14); border-color:rgba(0,212,255,0.35); color:var(--cyan);">+ manual</span>' :
+                    '');
 
                 const cells = orderedCols.map(col => {
                     if (col === 'token') {
@@ -5031,6 +5097,20 @@
             });
         });
 
+        // Manual token merge toggle (separate rows vs. sum into matching on-chain token)
+        syncManualMergeButtons();
+        document.querySelectorAll('.mm-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (btn.dataset.mmmode === manualMergeMode) return;
+                manualMergeMode = btn.dataset.mmmode;
+                syncManualMergeButtons();
+                saveManualMergeModeToStorage(manualMergeMode);
+                if (document.getElementById('summary').classList.contains('show')) {
+                    refreshView();
+                }
+            });
+        });
+
         // Tabs
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
@@ -5264,6 +5344,9 @@
             manualTokens = loadManualTokensFromStorage();
             renderManualTokenChips();
 
+            manualMergeMode = loadManualMergeModeFromStorage();
+            syncManualMergeButtons();
+
             const savedAddresses = loadAddressesFromStorage();
             if (savedAddresses && savedAddresses.length) {
                 resetAddrRows(savedAddresses[0]);
@@ -5324,6 +5407,7 @@
             try {
                 localStorage.removeItem(TOKENS_STORAGE_KEY());
                 localStorage.removeItem(MANUAL_TOKENS_STORAGE_KEY());
+                localStorage.removeItem(MANUAL_MERGE_MODE_STORAGE_KEY());
                 localStorage.removeItem(NETWORK_STORAGE_KEY());
                 localStorage.removeItem(COMBINED_MODE_STORAGE_KEY());
                 localStorage.removeItem(OTHER_NETWORKS_STORAGE_KEY());
