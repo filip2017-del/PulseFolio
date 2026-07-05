@@ -2500,6 +2500,7 @@
 
         const ICON_OVERRIDES = {
             WETH: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png',
+            ETH: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png',
             DAI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x6B175474E89094C44Da98b954EedeAC495271d0F/logo.png',
             USDC: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png',
             USDT: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png',
@@ -2624,6 +2625,7 @@
         const PORTFOLIO_CACHE_KEY = () => 'pulsefolio_portfolio_cache' + portfolioSuffix();
         const SORT_STORAGE_KEY = 'pulsefolio_sort_config';
         const MANUAL_TOKENS_STORAGE_KEY = () => 'pulsefolio_manual_tokens' + portfolioSuffix();
+        const COINGECKO_ICONS_CACHE_KEY = 'pulsefolio_coingecko_icons_cache';
 
         function saveAddressesToStorage(addresses) {
             try { localStorage.setItem(STORAGE_KEY(), JSON.stringify(addresses)); } catch (err) { console.warn(err); }
@@ -2726,6 +2728,79 @@
             if (currentSet.length !== cached.addresses.length) return false;
             const cachedSet = new Set(cached.addresses);
             return currentSet.every(a => cachedSet.has(a));
+        }
+
+        // =================================================================
+        //  COINGECKO ICONS CACHE (dla sieci innych niż PulseChain)
+        // =================================================================
+        function loadCoinGeckoIconsCache() {
+            try {
+                const raw = localStorage.getItem(COINGECKO_ICONS_CACHE_KEY);
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                if (typeof parsed !== 'object') return {};
+                // Usuń wpisy starsze niż 30 dni
+                const now = Date.now();
+                const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+                for (const symbol in parsed) {
+                    if (parsed[symbol].timestamp && (now - parsed[symbol].timestamp) > thirtyDaysMs) {
+                        delete parsed[symbol];
+                    }
+                }
+                return parsed;
+            } catch { return {}; }
+        }
+
+        function saveCoinGeckoIconsCache(cache) {
+            try { localStorage.setItem(COINGECKO_ICONS_CACHE_KEY, JSON.stringify(cache)); } catch (err) { console.warn(err); }
+        }
+
+        let coingeckoIconsCache = loadCoinGeckoIconsCache();
+
+        async function fetchCoinGeckoIcon(symbol) {
+            const key = (symbol || '').toUpperCase();
+            if (!key) return null;
+
+            // Sprawdź cache
+            if (coingeckoIconsCache[key] && coingeckoIconsCache[key].icon) {
+                return coingeckoIconsCache[key].icon;
+            }
+
+            // Nie pobieraj ponownie jeśli wiadomo, że ikony nie ma
+            if (coingeckoIconsCache[key] && coingeckoIconsCache[key].notFound) {
+                return null;
+            }
+
+            try {
+                const url = `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(key)}`;
+                const resp = await fetch(url);
+                if (!resp.ok) {
+                    if (resp.status === 429) {
+                        console.warn('CoinGecko rate limit dla ikony');
+                    }
+                    return null;
+                }
+                const data = await resp.json();
+                const coins = data.coins || [];
+
+                // Szukaj dokładnego dopasowania symbolu
+                const exact = coins.find(c => c.symbol && c.symbol.toLowerCase() === key.toLowerCase());
+                const candidate = exact || coins[0];
+
+                if (!candidate) {
+                    coingeckoIconsCache[key] = { notFound: true, timestamp: Date.now() };
+                    saveCoinGeckoIconsCache(coingeckoIconsCache);
+                    return null;
+                }
+
+                const icon = candidate.thumb || candidate.small || null;
+                coingeckoIconsCache[key] = { icon, timestamp: Date.now() };
+                saveCoinGeckoIconsCache(coingeckoIconsCache);
+                return icon;
+            } catch (err) {
+                console.error('Błąd pobierania ikony z CoinGecko:', err);
+                return null;
+            }
         }
 
         // =================================================================
@@ -2938,7 +3013,7 @@
                 const iconHtml = mt.icon ? iconImg(mt.icon) : '';
                 return `
               <div class="token-chip" title="${escapeHtml(mt.name)} (${escapeHtml(mt.symbol)}) · ${fmtUSD(mt.amount * mt.price)}">
-                <span class="mt-chip-icon" style="background: linear-gradient(135deg, ${style.color1}, ${style.color2});">${escapeHtml(style.letter)}${iconHtml}</span>
+                <span class="mt-chip-icon" style="background: ${mt.icon ? 'var(--surface-2)' : `linear-gradient(135deg, ${style.color1}, ${style.color2})`}; display: flex; align-items: center; justify-content: center;">${mt.icon ? '' : escapeHtml(style.letter)}${iconHtml}</span>
                 ${escapeHtml(mt.symbol.toUpperCase())}
                 <span style="color:var(--text-muted);font-weight:400;font-size:0.85em;">${formatTokenAmount(mt.amount)}</span>
                 <button class="token-chip-remove" type="button" data-id="${escapeHtml(mt.coingeckoId)}" title="Remove ${escapeHtml(mt.symbol)}" aria-label="Remove ${escapeHtml(mt.symbol)}">×</button>
@@ -2985,10 +3060,17 @@
                 const priceEl = document.getElementById('mtPrice');
                 const changeEl = document.getElementById('mtChange');
 
-                iconEl.style.background = `linear-gradient(135deg, ${style.color1}, ${style.color2})`;
-                iconEl.textContent = style.letter;
                 if (data.icon) {
+                    iconEl.style.background = 'var(--surface-2)';
+                    iconEl.style.display = 'flex';
+                    iconEl.style.alignItems = 'center';
+                    iconEl.style.justifyContent = 'center';
+                    iconEl.textContent = '';
                     iconEl.innerHTML = iconImg(data.icon);
+                } else {
+                    iconEl.style.background = `linear-gradient(135deg, ${style.color1}, ${style.color2})`;
+                    iconEl.style.display = 'block';
+                    iconEl.textContent = style.letter;
                 }
 
                 nameEl.textContent = data.name;
@@ -3202,7 +3284,7 @@
                     const changeText = hasChange ? fmtPct(w.change24h) : '—';
                     return `
                     <div class="row">
-                        <div class="icon" style="background: linear-gradient(135deg, ${style.color1}, ${style.color2});">${escapeHtml(style.letter)}${iconImg(w.icon)}</div>
+                        <div class="icon" style="background: ${w.icon ? 'var(--surface-2)' : `linear-gradient(135deg, ${style.color1}, ${style.color2})`}; display: flex; align-items: center; justify-content: center;">${w.icon ? '' : escapeHtml(style.letter)}${iconImg(w.icon)}</div>
                         <div class="row-info">
                             <div class="row-name">${escapeHtml(w.symbol)}</div>
                             <div class="row-sub">${escapeHtml(w.name)}</div>
@@ -3259,7 +3341,16 @@
                 const result = await searchTokenOnCoingecko(value);
                 lastCheckedWatchToken = result;
 
-                document.getElementById('wlIcon').innerHTML = result.icon ? iconImg(result.icon) : escapeHtml(result.symbol[0] || '?');
+                const wlIconEl = document.getElementById('wlIcon');
+                const style = tokenStyle(result.symbol);
+                if (result.icon) {
+                    wlIconEl.style.background = 'var(--surface-2)';
+                    wlIconEl.textContent = '';
+                    wlIconEl.innerHTML = iconImg(result.icon);
+                } else {
+                    wlIconEl.style.background = `linear-gradient(135deg, ${style.color1}, ${style.color2})`;
+                    wlIconEl.textContent = escapeHtml(result.symbol[0] || '?');
+                }
                 document.getElementById('wlName').textContent = result.name;
                 document.getElementById('wlSymbol').textContent = result.symbol;
                 document.getElementById('wlPrice').textContent = result.price ? formatPrice(result.price) : 'No price data';
@@ -3419,6 +3510,7 @@
             const unique = [...new Set(addresses.map(a => a.toLowerCase()))];
             const priceMap = {};
             const chain = getNetwork().dexChain;
+            const isNonPulseChain = selectedNetwork !== 'pulsechain';
 
             for (const chunk of chunkArray(unique, 30)) {
                 const url = `https://api.dexscreener.com/tokens/v1/${chain}/${chunk.join(',')}`;
@@ -3446,6 +3538,7 @@
                             price,
                             change24h: bestPair.priceChange?.h24 ?? null,
                             icon: iconPair?.info?.imageUrl ?? null,
+                            symbol: bestPair.baseToken?.symbol || null,
                         };
                     }
 
@@ -3463,12 +3556,32 @@
                             price: baseUsd / nativeRate,
                             change24h: null, // base token's 24h % change doesn't translate to the quote side
                             icon: null,
+                            symbol: bestPair.quoteToken?.symbol || null,
                         };
                     }
                 } catch (err) {
                     console.error('DexScreener error:', err);
                 }
                 await sleep(150);
+            }
+
+            // Dla sieci innych niż PulseChain, pobierz ikony z CoinGecko dla tokenów bez ikony
+            if (isNonPulseChain) {
+                const tokensNeedingIcons = Object.entries(priceMap)
+                    .filter(([addr, data]) => !data.icon && data.symbol)
+                    .map(([addr, data]) => ({ addr, symbol: data.symbol }));
+
+                for (const { addr, symbol } of tokensNeedingIcons) {
+                    try {
+                        const iconFromCoinGecko = await fetchCoinGeckoIcon(symbol);
+                        if (iconFromCoinGecko) {
+                            priceMap[addr].icon = iconFromCoinGecko;
+                        }
+                    } catch (err) {
+                        console.warn(`Błąd pobierania ikony z CoinGecko dla ${symbol}:`, err);
+                    }
+                    await sleep(100); // Rate limiting dla CoinGecko
+                }
             }
 
             return priceMap;
@@ -4207,9 +4320,12 @@
 
                 const cells = orderedCols.map(col => {
                     if (col === 'token') {
+                        const iconHtml = t.icon ? 
+                            `<div class="icon-sm" style="background: var(--surface-2); display: flex; align-items: center; justify-content: center;">${iconImg(t.icon)}</div>` :
+                            `<div class="icon-sm" style="background: linear-gradient(135deg, ${t.color1}, ${t.color2});">${escapeHtml(t.letter)}</div>`;
                         return `<td>
                             <div class="token-cell">
-                                <div class="icon-sm" style="background: linear-gradient(135deg, ${t.color1}, ${t.color2});">${escapeHtml(t.letter)}${iconImg(t.icon)}</div>
+                                ${iconHtml}
                                 <div class="token-name">
                                     <span class="token-symbol">${escapeHtml(t.symbol)} ${chainBadge}${farmBadge}${manualBadge}${athBadge}${noPriceBadge}</span>
                                     <span class="token-sub">${escapeHtml(t.name)}</span>
@@ -4265,7 +4381,7 @@
             list.innerHTML = farms.map(f => `
             <div class="farm-card">
               <div class="farm-head">
-                <div class="icon" style="background: linear-gradient(135deg, ${f.color1}, ${f.color2});">${escapeHtml(f.letter)}${iconImg(f.icon)}</div>
+                <div class="icon" style="background: ${f.icon ? 'var(--surface-2)' : `linear-gradient(135deg, ${f.color1}, ${f.color2})`}; display: flex; align-items: center; justify-content: center;">${f.icon ? '' : escapeHtml(f.letter)}${iconImg(f.icon)}</div>
                 <div class="farm-proto-col">
                   <div class="farm-proto">${escapeHtml(f.proto)}${(combinedMode && f.network) ? ` <span class="chain-badge ${f.network}">${NETWORKS[f.network].name}</span>` : ''}</div>
                   ${multiWallet ? `<div class="farm-wallet">${escapeHtml(shortAddr(f.sourceAddress))}</div>` : ''}
