@@ -1304,6 +1304,11 @@
             background: rgba(0, 212, 255, 0.14);
             border: 1px solid rgba(0, 212, 255, 0.35);
         }
+        .chain-badge.combined {
+            color: var(--purple);
+            background: rgba(139, 59, 255, 0.14);
+            border: 1px solid rgba(139, 59, 255, 0.35);
+        }
 
         /* ---------- ATH dream ---------- */
         .ath-dream-row {
@@ -1727,6 +1732,37 @@
         }
         .token-table th.sortable:hover {
             color: var(--text-primary);
+        }
+        .token-th-inner {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .merge-toggle-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 11px;
+            line-height: 1;
+            cursor: pointer;
+            padding: 0;
+            transition: all 0.15s ease;
+            flex-shrink: 0;
+        }
+        .merge-toggle-btn:hover {
+            color: var(--text-primary);
+            border-color: var(--text-secondary);
+        }
+        .merge-toggle-btn.active {
+            color: var(--cyan);
+            background: rgba(0, 212, 255, 0.14);
+            border-color: rgba(0, 212, 255, 0.35);
         }
         .token-table td {
             padding: 8px 6px;
@@ -2588,8 +2624,62 @@
                 .replace(/"/g, '&quot;');
         }
 
+        // ---------- icon caching ----------
+        // Token icons (from GitHub/DexScreener/CoinGecko) are small, unchanging images that
+        // get re-rendered constantly (every sort click, tab switch, merge toggle re-draws the
+        // whole table). Relying only on the browser's HTTP cache means they can still be
+        // re-fetched over the network once their Cache-Control lifetime expires. Instead we
+        // fetch each icon once, store it as a data URL in localStorage, and reuse that data URL
+        // directly as the <img src> from then on — zero network requests for icons already seen,
+        // even across page reloads.
+        const ICON_CACHE_STORAGE_KEY = 'pulsefolio_icon_cache_v1';
+        const ICON_CACHE_MAX_ENTRIES = 250;
+        let iconDataCache = {};
+        try {
+            const rawIconCache = localStorage.getItem(ICON_CACHE_STORAGE_KEY);
+            if (rawIconCache) iconDataCache = JSON.parse(rawIconCache) || {};
+        } catch (err) { iconDataCache = {}; }
+        const iconCachePending = new Set();
+
+        function persistIconCache() {
+            const keys = Object.keys(iconDataCache);
+            if (keys.length > ICON_CACHE_MAX_ENTRIES) {
+                // Simple FIFO eviction so the cache can't grow without bound.
+                for (const k of keys.slice(0, keys.length - ICON_CACHE_MAX_ENTRIES)) delete iconDataCache[k];
+            }
+            try { localStorage.setItem(ICON_CACHE_STORAGE_KEY, JSON.stringify(iconDataCache)); }
+            catch (err) { /* storage full/blocked — icon just won't persist, no functional impact */ }
+        }
+
+        function cacheIconInBackground(url) {
+            if (!url || iconDataCache[url] || iconCachePending.has(url)) return;
+            iconCachePending.add(url);
+            fetch(url)
+                .then(resp => { if (!resp.ok) throw new Error('bad status'); return resp.blob(); })
+                .then(blob => new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                }))
+                .then(dataUrl => {
+                    iconDataCache[url] = dataUrl;
+                    persistIconCache();
+                })
+                .catch(() => { /* CORS-blocked or network error — icon still loads directly, just not cached */ })
+                .finally(() => iconCachePending.delete(url));
+        }
+
         function iconImg(url) {
             if (!url) return '';
+            const cached = iconDataCache[url];
+            if (cached) {
+                // Already cached — served straight from localStorage, no network request at all.
+                return `<img src="${cached}" alt="" loading="lazy" onerror="this.style.display='none'" />`;
+            }
+            // First time seeing this icon — load it normally now, and cache it in the
+            // background so the next render (or the next visit) doesn't hit the network again.
+            cacheIconInBackground(url);
             return `<img src="${escapeHtml(url)}" alt="" loading="lazy" onerror="this.style.display='none'" />`;
         }
 
@@ -2673,6 +2763,7 @@
         const SORT_STORAGE_KEY = 'pulsefolio_sort_config';
         const MANUAL_TOKENS_STORAGE_KEY = () => 'pulsefolio_manual_tokens' + portfolioSuffix();
         const MANUAL_MERGE_MODE_STORAGE_KEY = () => 'pulsefolio_manual_merge_mode' + portfolioSuffix();
+        const WRAP_MERGE_STORAGE_KEY = () => 'pulsefolio_wrap_merge_enabled' + portfolioSuffix();
         const COINGECKO_ICONS_CACHE_KEY = 'pulsefolio_coingecko_icons_cache';
 
         function saveAddressesToStorage(addresses) {
@@ -2990,10 +3081,126 @@
             }
         }
 
+        // Whether wrapped tokens (WETH, etc.) get folded into their native counterpart (ETH).
+        // Toggled from the small button next to the "Token" column header; on by default.
+        function loadWrapMergeFromStorage() {
+            try {
+                const val = localStorage.getItem(WRAP_MERGE_STORAGE_KEY());
+                return val === null ? true : val === 'true';
+            } catch (err) { return true; }
+        }
+        function saveWrapMergeToStorage(val) {
+            try { localStorage.setItem(WRAP_MERGE_STORAGE_KEY(), val ? 'true' : 'false'); } catch (err) { console.warn(err); }
+        }
+        let wrapMergeEnabled = loadWrapMergeFromStorage();
+
+        // Tokens that should always be summed together into one row, since they represent
+        // the same underlying asset (e.g. wrapped vs. native). Key = symbol to fold in,
+        // value = canonical symbol it gets summed into.
+        const TOKEN_EQUIVALENTS = {
+            WETH: 'ETH',
+        };
+
+        function canonicalSymbol(symbol) {
+            const upper = (symbol || '').toUpperCase();
+            return TOKEN_EQUIVALENTS[upper] || upper;
+        }
+
+        // Symbols that participate in an equivalence mapping (either as the wrapped side,
+        // like WETH, or as the canonical target, like ETH). Only these get folded together;
+        // every other symbol is left exactly as-is, even if it repeats across networks
+        // (e.g. USDC on PulseChain and USDC on Ethereum stay as two separate, badged rows).
+        const EQUIVALENCE_RELEVANT_SYMBOLS = new Set([
+            ...Object.keys(TOKEN_EQUIVALENTS),
+            ...Object.values(TOKEN_EQUIVALENTS),
+        ]);
+
+        // Folds equivalent-asset rows (e.g. WETH into ETH) into a single row, summing
+        // amount/usd and keeping the canonical token's identity (icon, name, network badge).
+        // Works across networks and farm-derived rows alike — anything that reaches this
+        // function with a symbol in TOKEN_EQUIVALENTS (or its canonical target) gets folded
+        // together. Symbols with no equivalence mapping (e.g. USDC) pass through untouched,
+        // so unrelated same-symbol tokens from different networks are never merged.
+        function applyTokenEquivalents(tokens) {
+            if (!wrapMergeEnabled) return tokens;
+
+            const passthrough = [];
+            const order = []; // preserves first-seen order of canonical symbols
+            const bySymbol = new Map();
+            const networksSeen = new Map(); // canon -> Set of networks contributing to it
+
+            for (const t of tokens) {
+                const upperSymbol = (t.symbol || '').toUpperCase();
+                if (!EQUIVALENCE_RELEVANT_SYMBOLS.has(upperSymbol)) {
+                    passthrough.push(t);
+                    continue;
+                }
+                const canon = canonicalSymbol(upperSymbol);
+                const isEquivalent = canon !== upperSymbol;
+
+                const existing = bySymbol.get(canon);
+                if (!existing) {
+                    const merged = { ...t };
+                    if (isEquivalent) {
+                        // Only an equivalent (e.g. WETH) was found so far — display it under
+                        // the canonical symbol/name while we wait to see if ETH also shows up.
+                        merged.symbol = canon;
+                        merged.name = canon;
+                        const style = tokenStyle(canon);
+                        Object.assign(merged, style);
+                    }
+                    if (t.manuallyAdded && isEquivalent) merged.summedManual = true;
+                    bySymbol.set(canon, merged);
+                    order.push(canon);
+                    networksSeen.set(canon, new Set(t.network ? [t.network] : []));
+                } else {
+                    const prevRaw = existing.rawAmount || 0;
+                    const addedRaw = t.rawAmount || 0;
+                    const prevUsd = existing.usd || 0;
+                    const addedUsd = t.usd || 0;
+                    const newUsd = prevUsd + addedUsd;
+                    const prevChange = existing.change ?? 0;
+                    const addedChange = t.change ?? 0;
+                    existing.change = newUsd > 0 ?
+                        (prevChange * prevUsd + addedChange * addedUsd) / newUsd :
+                        (existing.change ?? t.change);
+                    existing.rawAmount = prevRaw + addedRaw;
+                    existing.amount = formatTokenAmount(existing.rawAmount);
+                    existing.usd = newUsd;
+                    if (existing.noPrice && !t.noPrice) existing.noPrice = false;
+                    if (t.manuallyAdded || existing.manuallyAdded) {
+                        // A manual row got folded in alongside an on-chain row — flag it,
+                        // but the combined row itself is no longer purely "manual".
+                        existing.summedManual = true;
+                        existing.manuallyAdded = false;
+                    }
+                    // A farm-derived row folded into a wallet row (or vice versa) — keep the
+                    // "farm" badge if any of the contributing rows came from a farm, but the
+                    // combined row itself isn't wallet-only anymore.
+                    existing.fromFarm = existing.fromFarm || t.fromFarm || false;
+                    existing.isAth = existing.isAth || t.isAth || false;
+                    // Prefer the canonical (non-equivalent) token's icon/name if we have one.
+                    if (!isEquivalent) {
+                        existing.symbol = canon;
+                        existing.name = t.name || existing.name;
+                        existing.icon = t.icon || existing.icon;
+                        if (t.address) existing.address = t.address;
+                    }
+                    if (t.network) networksSeen.get(canon).add(t.network);
+                }
+            }
+
+            // If a merged row combines tokens from more than one network, a single specific
+            // network badge would be misleading — show a "Combined" tag instead.
+            for (const [canon, nets] of networksSeen) {
+                if (nets.size > 1) bySymbol.get(canon).network = 'combined';
+            }
+
+            return [...passthrough, ...order.map(sym => bySymbol.get(sym))];
+        }
+
         // Merge manual tokens into portfolio data
         function mergeManualTokensIntoPortfolio(portfolioData) {
-            if (!manualTokens.length) return portfolioData;
-
             // Work on a shallow copy of on-chain tokens so summed ones can be mutated
             // without touching the objects cached elsewhere.
             const baseTokens = portfolioData.tokens.map(t => ({ ...t }));
@@ -3042,7 +3249,9 @@
             }
 
             // Merge into portfolioData.tokens
-            const allTokens = [...baseTokens, ...manualTokenObjects];
+            let allTokens = [...baseTokens, ...manualTokenObjects];
+            // Fold equivalent-asset rows together (e.g. WETH summed into ETH)
+            allTokens = applyTokenEquivalents(allTokens);
             // Sort by USD value
             allTokens.sort((a, b) => (b.usd || 0) - (a.usd || 0));
 
@@ -4173,7 +4382,7 @@
                 const raw = localStorage.getItem(SORT_STORAGE_KEY);
                 if (raw) {
                     const parsed = JSON.parse(raw);
-                    if (parsed.key && parsed.direction) {
+                    if (parsed.key && parsed.key !== 'token' && parsed.direction) {
                         sortConfig = parsed;
                         return;
                     }
@@ -4321,6 +4530,10 @@
                 result = combined;
             }
 
+            // Fold equivalent-asset rows together (e.g. WETH summed into ETH), including
+            // rows that came from farms/staking and rows from other networks.
+            result = applyTokenEquivalents(result);
+
             for (const t of result) {
                 t.price = t.rawAmount > 0 ? (t.usd || 0) / t.rawAmount : 0;
             }
@@ -4350,8 +4563,13 @@
                 if (col === 'value') label = 'Value';
                 const isActive = col === activeKey;
                 const arrow = isActive ? (sortConfig.direction === 'asc' ? ' ↑' : ' ↓') : '';
-                const cls = isActive ? 'sortable active' : 'sortable';
-                headerHtml += `<th class="${cls}" data-sort="${col}">${label}${arrow}</th>`;
+                const cls = col === 'token' ? 'unsortable' : (isActive ? 'sortable active' : 'sortable');
+                if (col === 'token') {
+                    const mergeBtn = `<button class="merge-toggle-btn ${wrapMergeEnabled ? 'active' : ''}" id="wrapMergeToggleBtn" type="button" title="${wrapMergeEnabled ? 'Wrapped tokens (e.g. WETH) are merged into their native token — click to split them apart' : 'Wrapped tokens are shown separately — click to merge them into their native token (e.g. WETH into ETH)'}">⇄</button>`;
+                    headerHtml += `<th class="${cls}"><span class="token-th-inner">${label}${mergeBtn}</span></th>`;
+                } else {
+                    headerHtml += `<th class="${cls}" data-sort="${col}">${label}${arrow}</th>`;
+                }
             }
             headerHtml += '</tr></thead>';
 
@@ -4374,7 +4592,7 @@
                 }
 
                 const chainBadge = (combinedMode && t.network) ?
-                    `<span class="chain-badge ${t.network}" style="font-size:0.7em; padding:1px 5px;">${NETWORKS[t.network].name}</span>` : '';
+                    `<span class="chain-badge ${t.network}" style="font-size:0.7em; padding:1px 5px;">${t.network === 'combined' ? 'Combined' : NETWORKS[t.network].name}</span>` : '';
                 const farmBadge = t.fromFarm ? '<span class="farm-badge" style="font-size:0.7em; padding:1px 5px;">farm</span>' : '';
                 const noPriceBadge = (!athMode && t.noPrice) ? '<span class="no-price-badge" style="font-size:0.7em; padding:1px 5px;">no price</span>' :
                     '';
@@ -4432,6 +4650,16 @@
                     refreshView();
                 });
             });
+
+            const wrapMergeBtn = document.getElementById('wrapMergeToggleBtn');
+            if (wrapMergeBtn) {
+                wrapMergeBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    wrapMergeEnabled = !wrapMergeEnabled;
+                    saveWrapMergeToStorage(wrapMergeEnabled);
+                    refreshView();
+                });
+            }
         }
 
         function renderFarms(farms) {
@@ -5347,6 +5575,8 @@
             manualMergeMode = loadManualMergeModeFromStorage();
             syncManualMergeButtons();
 
+            wrapMergeEnabled = loadWrapMergeFromStorage();
+
             const savedAddresses = loadAddressesFromStorage();
             if (savedAddresses && savedAddresses.length) {
                 resetAddrRows(savedAddresses[0]);
@@ -5408,6 +5638,7 @@
                 localStorage.removeItem(TOKENS_STORAGE_KEY());
                 localStorage.removeItem(MANUAL_TOKENS_STORAGE_KEY());
                 localStorage.removeItem(MANUAL_MERGE_MODE_STORAGE_KEY());
+                localStorage.removeItem(WRAP_MERGE_STORAGE_KEY());
                 localStorage.removeItem(NETWORK_STORAGE_KEY());
                 localStorage.removeItem(COMBINED_MODE_STORAGE_KEY());
                 localStorage.removeItem(OTHER_NETWORKS_STORAGE_KEY());
