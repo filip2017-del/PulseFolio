@@ -156,7 +156,7 @@
             /* Breaks out of main's centered, max-width column so the bar's
                background/border reach the actual browser edges. The inner
                content is then re-centered and capped back to the app's
-               normal width by .portfolio-bar-inner below. github*/
+               normal width by .portfolio-bar-inner below. */
             width: 100vw;
             position: relative;
             left: 50%;
@@ -1027,6 +1027,12 @@
             justify-content: space-between;
             align-items: center;
             gap: 8px;
+            flex-wrap: wrap;
+        }
+        .chart-refresh-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         .chart-toggle {
             display: inline-flex;
@@ -1056,6 +1062,40 @@
             border-style: solid;
             border-color: var(--purple);
             color: var(--text-primary);
+        }
+        .refresh-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--surface-2);
+            border: 1px dashed var(--border);
+            color: var(--text-secondary);
+            font-family: 'Inter', sans-serif;
+            font-size: clamp(11px, 0.85vw, 13px);
+            font-weight: 500;
+            padding: 5px 10px 5px 8px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s, color 0.2s;
+            margin-bottom: 4px;
+        }
+        .refresh-toggle:hover {
+            border-color: var(--purple);
+            color: var(--text-primary);
+        }
+        .refresh-toggle i {
+            font-size: 14px;
+        }
+        .refresh-toggle:disabled {
+            opacity: 0.6;
+            cursor: default;
+        }
+        .refresh-toggle i.spinning {
+            animation: refresh-spin 0.8s linear infinite;
+        }
+        @keyframes refresh-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
         }
         .other-networks-toggle.visible {
             display: inline-flex;
@@ -1136,7 +1176,7 @@
         }
         .snapshot-chart svg {
             width: 100%;
-            height: 56px;
+            height: 92px;
             display: block;
             overflow: visible;
         }
@@ -1144,6 +1184,38 @@
             font-size: clamp(11px, 0.85vw, 13px);
             color: var(--text-secondary);
             margin-top: 6px;
+        }
+        .chart-range-row {
+            display: flex;
+            justify-content: flex-end;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+        .range-btn {
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: clamp(10px, 0.75vw, 12px);
+            font-weight: 600;
+            padding: 3px 10px;
+            border-radius: 999px;
+            cursor: pointer;
+            font-family: 'Inter', sans-serif;
+            transition: all 0.15s ease;
+        }
+        .range-btn:hover {
+            color: var(--text-primary);
+            border-color: var(--text-secondary);
+        }
+        .range-btn.active {
+            background: var(--surface-2);
+            color: var(--text-primary);
+            border-color: var(--purple);
+        }
+        .range-btn:disabled {
+            opacity: 0.4;
+            cursor: default;
+            pointer-events: none;
         }
 
         /* ---------- tabs ---------- */
@@ -2177,10 +2249,16 @@
             </div>
 
             <div class="other-networks-row">
-                <button class="chart-toggle" id="toggleChartBtn" type="button" title="Show portfolio value chart">
-                    <i class="ti ti-chart-line" aria-hidden="true"></i>
-                    <span>Chart 📈</span>
-                </button>
+                <div class="chart-refresh-group">
+                    <button class="chart-toggle" id="toggleChartBtn" type="button" title="Show portfolio value chart">
+                        <i class="ti ti-chart-line" aria-hidden="true"></i>
+                        <span>Chart 📈</span>
+                    </button>
+                    <button class="refresh-toggle" id="refreshPortfolioBtn" type="button" title="Refresh portfolio balances and prices">
+                        <i class="ti ti-refresh" aria-hidden="true"></i>
+                        <span>Refresh</span>
+                    </button>
+                </div>
                 <button class="other-networks-toggle" id="otherNetworksBtn" type="button" title="Also load Base, Arbitrum and BNB Chain (slower)">
                     <i class="ti ti-plus" aria-hidden="true"></i>
                     <span>Other networks</span>
@@ -2191,7 +2269,12 @@
             <div class="p-change pos" id="totalChange">+0%</div>
 
             <div class="snapshot-chart" id="snapshotChart">
-                <svg id="snapshotSvg" viewBox="0 0 300 60" preserveAspectRatio="none"></svg>
+                <div class="chart-range-row">
+                    <button class="range-btn" data-range="24h" type="button">24h</button>
+                    <button class="range-btn" data-range="1w" type="button">1W</button>
+                    <button class="range-btn" data-range="1m" type="button">1M</button>
+                </div>
+                <svg id="snapshotSvg" viewBox="0 0 300 92" preserveAspectRatio="none"></svg>
                 <div class="snapshot-meta" id="snapshotMeta"></div>
             </div>
         </div>
@@ -2613,6 +2696,14 @@
         // =================================================================
         const fmtUSD = n => Number(n || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD',
             maximumFractionDigits: n >= 100 ? 0 : 2 });
+        function fmtCompactUSD(n) {
+            const sign = n < 0 ? '-' : '';
+            const abs = Math.abs(Number(n) || 0);
+            if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(abs >= 1e10 ? 0 : 1)}B`;
+            if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(abs >= 1e7 ? 0 : 1)}M`;
+            if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(abs >= 1e4 ? 0 : 1)}K`;
+            return `${sign}$${abs.toFixed(abs >= 100 ? 0 : 2)}`;
+        }
         const fmtPct = n => `${n >= 0 ? '+' : ''}${Number(n).toFixed(1)}%`;
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -3069,6 +3160,30 @@
             // Rebuild portfolio view if it's showing
             if (document.getElementById('summary').classList.contains('show')) {
                 refreshView();
+            }
+        }
+
+        // Re-fetches live prices for every manually added token. Called alongside the main
+        // "Check" button so manual token prices no longer stay frozen at whatever they were
+        // when the token was first added — they now update every time the portfolio refreshes.
+        async function refreshManualTokenPrices() {
+            if (!manualTokens.length) return;
+            try {
+                const ids = [...new Set(manualTokens.map(mt => mt.coingeckoId))];
+                const priceMap = await fetchTokenPrices(ids);
+                for (const mt of manualTokens) {
+                    const fresh = priceMap[mt.coingeckoId];
+                    if (fresh && fresh.price != null) {
+                        mt.price = fresh.price;
+                        mt.change24h = fresh.change24h;
+                    }
+                }
+                saveManualTokensToStorage(manualTokens);
+                renderManualTokenChips();
+            } catch (err) {
+                console.warn('Failed to refresh manual token prices:', err);
+                // Non-fatal — the portfolio load itself should still succeed even if this fails,
+                // manual tokens will just keep showing their last known prices.
             }
         }
 
@@ -4775,7 +4890,9 @@
         //  SNAPSHOTS — portfolio value over time
         // =================================================================
         const SNAPSHOTS_STORAGE_KEY = 'pulsefolio_snapshots';
-        const MAX_SNAPSHOTS_PER_CONTEXT = 90;
+        const MAX_SNAPSHOTS_PER_CONTEXT = 500;
+        const SNAPSHOT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // keep ~30 days of history
+        const SNAPSHOT_MIN_GAP_MS = 60 * 60 * 1000; // collapse refreshes closer than 1 hour together
 
         // Snapshots are scoped per "context" (network/combined-mode + exact address set),
         // so switching wallets or networks doesn't mix unrelated history together.
@@ -4800,28 +4917,42 @@
             try { localStorage.setItem(SNAPSHOTS_STORAGE_KEY, JSON.stringify(all)); } catch (err) { console.warn(err); }
         }
 
+        // Normalizes a stored point to a numeric timestamp, whether it's a fresh point
+        // (has `ts`) or a legacy one from before intraday tracking (only has `date`).
+        function snapshotTs(p) {
+            if (Number.isFinite(p.ts)) return p.ts;
+            const parsed = Date.parse(p.date);
+            return Number.isFinite(parsed) ? parsed : Date.now();
+        }
+
         function getSnapshotsForContext(addresses) {
             const all = loadAllSnapshots();
             return all[getSnapshotContextKey(addresses)] || [];
         }
 
-        // Records (or updates) today's value for this wallet/network context.
-        // Only one entry per calendar day is kept, so repeated checks don't spam the history.
+        // Records (or updates) the current value for this wallet/network context. Refreshes
+        // within SNAPSHOT_MIN_GAP_MS (1 hour) of each other update the latest point instead of
+        // adding a new one, so mashing the refresh button doesn't spam the history with
+        // near-duplicate points — otherwise every check adds its own timestamped point, which
+        // is what lets the chart show real movement over time instead of just once per day.
         function recordSnapshot(addresses, value) {
             if (!addresses || !addresses.length || !Number.isFinite(value)) return;
             const key = getSnapshotContextKey(addresses);
             const all = loadAllSnapshots();
             const list = all[key] || [];
-            const today = new Date().toISOString().slice(0, 10);
+            const now = Date.now();
 
             const last = list[list.length - 1];
-            if (last && last.date === today) {
+            if (last && (now - snapshotTs(last)) < SNAPSHOT_MIN_GAP_MS) {
                 last.value = value;
+                last.ts = now;
             } else {
-                list.push({ date: today, value });
+                list.push({ ts: now, value });
             }
 
-            all[key] = list.slice(-MAX_SNAPSHOTS_PER_CONTEXT);
+            const cutoff = now - SNAPSHOT_MAX_AGE_MS;
+            const pruned = list.filter(p => snapshotTs(p) >= cutoff);
+            all[key] = pruned.slice(-MAX_SNAPSHOTS_PER_CONTEXT);
             saveAllSnapshots(all);
         }
 
@@ -4832,6 +4963,39 @@
 
         let chartVisible = false; // the chart is only rendered once the user clicks the "Chart" button
         let chartHasData = false;
+        let lastChartAddresses = null; // so the range buttons can re-render without needing addresses passed in again
+
+        const CHART_RANGE_STORAGE_KEY = 'pulsefolio_chart_range';
+        const CHART_RANGES = {
+            '24h': { ms: 24 * 60 * 60 * 1000, label: 'Last 24 hours' },
+            '1w': { ms: 7 * 24 * 60 * 60 * 1000, label: 'Last 7 days' },
+            '1m': { ms: 30 * 24 * 60 * 60 * 1000, label: 'Last 30 days' },
+        };
+        function loadChartRangeFromStorage() {
+            try {
+                const val = localStorage.getItem(CHART_RANGE_STORAGE_KEY);
+                return CHART_RANGES[val] ? val : '24h';
+            } catch (err) { return '24h'; }
+        }
+        function saveChartRangeToStorage(val) {
+            try { localStorage.setItem(CHART_RANGE_STORAGE_KEY, val); } catch (err) { console.warn(err); }
+        }
+        let chartRange = loadChartRangeFromStorage();
+        const CHART_RANGE_ORDER = ['24h', '1w', '1m'];
+        let rangeAvailability = null; // filled in whenever the chart renders with real data
+
+        // Enables/disables each range button based on whether that range actually has
+        // enough recorded points (2+) to draw anything, and marks whichever range is
+        // actually being displayed (which may be higher than the user's stored preference,
+        // if the preferred one doesn't have enough data yet).
+        function syncChartRangeButtons(effectiveRange) {
+            document.querySelectorAll('.range-btn').forEach(btn => {
+                const key = btn.dataset.range;
+                const available = !rangeAvailability || rangeAvailability[key] !== false;
+                btn.disabled = !available;
+                btn.classList.toggle('active', key === (effectiveRange || chartRange));
+            });
+        }
 
         function syncChartVisibility() {
             const container = document.getElementById('snapshotChart');
@@ -4841,45 +5005,126 @@
             if (btn) btn.classList.toggle('active', chartVisible);
         }
 
+        function formatAxisTime(ts, spanMs) {
+            const d = new Date(ts);
+            if (spanMs <= 26 * 60 * 60 * 1000) {
+                // Within roughly a day — show a time of day, like the CoinGecko-style chart.
+                return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+            }
+            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        }
+
         function renderSnapshotChart(addresses) {
             const container = document.getElementById('snapshotChart');
             const svg = document.getElementById('snapshotSvg');
             const meta = document.getElementById('snapshotMeta');
-            if (!container || !svg || !addresses) return;
+            if (addresses) lastChartAddresses = addresses;
+            const effectiveAddresses = addresses || lastChartAddresses;
+            if (!container || !svg || !effectiveAddresses) return;
 
-            const points = getSnapshotsForContext(addresses);
-            if (points.length < 2) {
+            const allPoints = getSnapshotsForContext(effectiveAddresses)
+                .map(p => ({ ts: snapshotTs(p), value: p.value }))
+                .sort((a, b) => a.ts - b.ts);
+            if (allPoints.length < 2) {
                 chartHasData = false;
                 syncChartVisibility();
                 return;
             }
 
+            // Work out which ranges actually have enough points (2+) to draw. If the user's
+            // selected range doesn't, silently step up to the next range that does — the
+            // button for the insufficient range gets disabled rather than falling back to a
+            // "not enough data" message under the range the person actually chose.
+            const now = Date.now();
+            rangeAvailability = {};
+            for (const key of CHART_RANGE_ORDER) {
+                rangeAvailability[key] = allPoints.filter(p => now - p.ts <= CHART_RANGES[key].ms).length >= 2;
+            }
+            let effectiveRange = chartRange;
+            if (!rangeAvailability[effectiveRange]) {
+                const startIdx = CHART_RANGE_ORDER.indexOf(effectiveRange);
+                const upgrade = CHART_RANGE_ORDER.slice(startIdx + 1).find(key => rangeAvailability[key]);
+                if (upgrade) effectiveRange = upgrade;
+            }
+
+            const rangeDef = CHART_RANGES[effectiveRange] || CHART_RANGES['24h'];
+            let points = allPoints.filter(p => now - p.ts <= rangeDef.ms);
+            let isFallback = false;
+            if (points.length < 2) {
+                points = allPoints;
+                isFallback = true;
+            }
+            syncChartRangeButtons(effectiveRange);
+
             const values = points.map(p => p.value);
             const min = Math.min(...values);
-            const max = Math.max(...values);
-            const range = (max - min) || 1;
-            const w = 300, h = 60, pad = 4;
+            const max = Math.min(Math.max(...values), Number.MAX_VALUE);
+            const maxVal = Math.max(...values);
+            const range = (maxVal - min) || Math.abs(min) * 0.02 || 1;
+
+            // Layout: value scale on the right (like the reference chart), a bit of
+            // headroom above/below the line, and room at the bottom for time labels.
+            // The 24h range shows full, non-abbreviated prices (no "K"/"M" suffix), which
+            // need a bit more width reserved than the compact labels used for 1W/1M.
+            const useFullPriceLabels = effectiveRange === '24h';
+            const w = 300, h = 92;
+            const labelW = useFullPriceLabels ? 62 : 46;
+            const plotLeft = 2, plotRight = w - labelW;
+            const plotTop = 8, plotBottom = h - 20;
 
             const coords = points.map((p, i) => {
-                const x = pad + (i / (points.length - 1)) * (w - pad * 2);
-                const y = h - pad - ((p.value - min) / range) * (h - pad * 2);
+                const x = plotLeft + (points.length > 1 ? (i / (points.length - 1)) : 0) * (plotRight - plotLeft);
+                const y = plotBottom - ((p.value - min) / range) * (plotBottom - plotTop);
                 return [x, y];
             });
 
             const linePath = coords.map((c, i) => `${i === 0 ? 'M' : 'L'}${c[0].toFixed(1)},${c[1].toFixed(1)}`).join(' ');
-            const areaPath = `${linePath} L${coords[coords.length - 1][0].toFixed(1)},${h} L${coords[0][0].toFixed(1)},${h} Z`;
+            const areaPath = `${linePath} L${coords[coords.length - 1][0].toFixed(1)},${plotBottom} L${coords[0][0].toFixed(1)},${plotBottom} Z`;
 
             const first = values[0];
             const lastVal = values[values.length - 1];
             const pctChange = first ? ((lastVal - first) / Math.abs(first)) * 100 : 0;
             const color = pctChange >= 0 ? '#35d68b' : '#ff5470'; // matches --green / --red
 
+            // Full horizontal grid — several evenly spaced value levels with labels, rather
+            // than just marking the min/max.
+            const GRID_LINES = 5;
+            let gridSvg = '';
+            for (let i = 0; i < GRID_LINES; i++) {
+                const frac = i / (GRID_LINES - 1);
+                const val = min + frac * range;
+                const y = plotBottom - frac * (plotBottom - plotTop);
+                const label = useFullPriceLabels ? fmtUSD(val) : fmtCompactUSD(val);
+                gridSvg += `<line x1="${plotLeft}" y1="${y.toFixed(1)}" x2="${plotRight}" y2="${y.toFixed(1)}"
+                    stroke="var(--border)" stroke-width="1"></line>`;
+                gridSvg += `<text x="${plotRight + 6}" y="${(y + 3).toFixed(1)}" font-size="8"
+                    style="fill:var(--text-muted)">${escapeHtml(label)}</text>`;
+            }
+
+
+            // Time axis — first, middle and last timestamps in the visible window.
+            const spanMs = points[points.length - 1].ts - points[0].ts;
+            const axisIdxs = points.length > 2 ? [0, Math.floor((points.length - 1) / 2), points.length - 1] : [0, points.length - 1];
+            let axisSvg = '';
+            for (const idx of axisIdxs) {
+                const x = coords[idx][0];
+                const label = formatAxisTime(points[idx].ts, spanMs);
+                const anchor = idx === 0 ? 'start' : (idx === points.length - 1 ? 'end' : 'middle');
+                axisSvg += `<text x="${x.toFixed(1)}" y="${h - 4}" font-size="8" text-anchor="${anchor}"
+                    style="fill:var(--text-muted)">${escapeHtml(label)}</text>`;
+            }
+
             svg.innerHTML = `
+                ${gridSvg}
                 <path d="${areaPath}" fill="${color}" opacity="0.14" stroke="none"></path>
                 <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
+                ${axisSvg}
             `;
 
-            meta.textContent = `${points[0].date} → ${points[points.length - 1].date} · ${pctChange >= 0 ? '+' : ''}${pctChange.toFixed(1)}% over ${points.length} snapshots`;
+            const rangeLabel = isFallback ?
+                `${new Date(points[0].ts).toLocaleDateString()} → ${new Date(points[points.length - 1].ts).toLocaleDateString()} (not enough history in this range yet — showing everything available)` :
+                rangeDef.label;
+            meta.textContent = `${rangeLabel} · ${pctChange >= 0 ? '+' : ''}${pctChange.toFixed(1)}% over ${points.length} checks`;
             chartHasData = true;
             syncChartVisibility();
         }
@@ -4949,14 +5194,21 @@
 
             const btn = document.getElementById('loadBtn');
             const loading = document.getElementById('loadingSpinner');
+            const refreshBtn = document.getElementById('refreshPortfolioBtn');
+            const refreshIcon = refreshBtn ? refreshBtn.querySelector('i') : null;
 
             btn.disabled = true;
+            if (refreshBtn) refreshBtn.disabled = true;
+            if (refreshIcon) refreshIcon.classList.add('spinning');
             loading.classList.add('show');
             document.getElementById('summary').classList.add('show');
             document.getElementById('emptyState').style.display = 'none';
 
             try {
-                const data = combinedMode ? await loadCombinedPortfolio(addresses) : await loadMultiPortfolio(addresses);
+                const [data] = await Promise.all([
+                    combinedMode ? loadCombinedPortfolio(addresses) : loadMultiPortfolio(addresses),
+                    refreshManualTokenPrices(),
+                ]);
                 showResults(data, addresses.length, { addresses });
                 document.getElementById('tokenList').classList.add('show');
                 document.getElementById('farmList').classList.remove('show');
@@ -4981,6 +5233,8 @@
             } finally {
                 loading.classList.remove('show');
                 btn.disabled = false;
+                if (refreshBtn) refreshBtn.disabled = false;
+                if (refreshIcon) refreshIcon.classList.remove('spinning');
             }
         }
 
@@ -5175,6 +5429,15 @@
             syncChartVisibility();
         });
 
+        document.querySelectorAll('.range-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                if (btn.dataset.range === chartRange) return;
+                chartRange = btn.dataset.range;
+                saveChartRangeToStorage(chartRange);
+                renderSnapshotChart();
+            });
+        });
+
         document.getElementById('otherNetworksBtn').addEventListener('click', function() {
             // Only meaningful while combined mode is active. Opens the address editor
             // where the exact set of extra networks can be picked via checkboxes.
@@ -5204,6 +5467,7 @@
         });
 
         document.getElementById('loadBtn').addEventListener('click', handleLoad);
+        document.getElementById('refreshPortfolioBtn').addEventListener('click', handleLoad);
 
         document.getElementById('addrRows').addEventListener('keydown', e => {
             if (e.key === 'Enter' && e.target.classList.contains('addr-input')) handleLoad();
@@ -5327,6 +5591,7 @@
 
         // Manual token merge toggle (separate rows vs. sum into matching on-chain token)
         syncManualMergeButtons();
+        syncChartRangeButtons();
         document.querySelectorAll('.mm-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (btn.dataset.mmmode === manualMergeMode) return;
