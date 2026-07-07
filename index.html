@@ -129,26 +129,6 @@
         header nav i:hover {
             color: var(--text-primary);
         }
-        .nav-watchlist-btn {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            font-family: 'Inter', sans-serif;
-            font-size: clamp(11px, 0.9vw, 13px);
-            font-weight: 600;
-            color: var(--text-secondary);
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 6px 12px;
-            cursor: pointer;
-            white-space: nowrap;
-            transition: border-color 0.2s, color 0.2s;
-        }
-        .nav-watchlist-btn:hover {
-            border-color: var(--purple);
-            color: var(--text-primary);
-        }
 
         /* ---------- portfolio bar ---------- */
         .portfolio-bar {
@@ -2070,7 +2050,6 @@
             Pulse<span class="grad-text">Folio</span>
         </div>
         <nav>
-            <button class="nav-watchlist-btn" id="watchlistNavBtn" type="button">⭐</button>
             <i class="ti ti-brand-x" aria-hidden="true"></i>
             <i class="ti ti-menu-2" aria-hidden="true"></i>
         </nav>
@@ -2197,40 +2176,6 @@
             <div class="manual-token-msg" id="manualTokenMsg"></div>
 
             <div class="manual-token-list" id="manualTokenList"></div>
-        </div>
-
-        <div class="token-card" id="watchlistCard">
-            <div class="search-card-head">
-                <div class="search-label">Watchlist — track prices without a wallet</div>
-                <button class="btn-collapse show" id="closeWatchlistBtn" type="button" title="Close" aria-label="Close"><svg class="icon-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="M6 6l12 12"></path></svg></button>
-            </div>
-
-            <div class="manual-token-row">
-                <input id="watchlistSymbolInput" type="text" placeholder="Token symbol (e.g. BTC, HEX, SOL)" autocomplete="off" />
-                <button class="btn-grad" id="watchlistSearchBtn" type="button">Search</button>
-            </div>
-
-            <div class="manual-token-result" id="watchlistPreview">
-                <div class="mt-icon" id="wlIcon">?</div>
-                <div class="mt-info">
-                    <div class="mt-name" id="wlName">—</div>
-                    <div class="mt-symbol" id="wlSymbol">—</div>
-                </div>
-                <div class="mt-price">
-                    <div class="mt-usd" id="wlPrice">—</div>
-                    <div class="mt-change" id="wlChange">—</div>
-                </div>
-            </div>
-
-            <div class="manual-token-row" id="watchlistAddRow" style="display:none; margin-top:10px;">
-                <button class="btn-grad" id="watchlistAddBtn" type="button" style="flex:1;">Add to watchlist</button>
-                <button class="btn-bar" id="watchlistCancelBtn" type="button">Cancel</button>
-            </div>
-
-            <div class="manual-token-msg" id="watchlistMsg"></div>
-
-            <div id="watchlistItems"></div>
-            <div class="token-empty-hint" id="watchlistEmptyHint">Tokens you watch here are saved in this browser only — no wallet needed.</div>
         </div>
 
         <div class="notice" id="notice"></div>
@@ -2524,6 +2469,25 @@
 
         function getNetwork() {
             return NETWORKS[selectedNetwork];
+        }
+
+        // True whenever PulseChain is part of what's currently being viewed — either as the
+        // single active network, or as part of the PulseChain+Ethereum(+extras) combined view.
+        // ATH Dream / Multiplier are PulseChain/HEX-ecosystem tools, so they're only shown
+        // (and only take effect) in this state.
+        // True only in the plain single-network PulseChain view — NOT in Combined mode (even
+        // though Combined includes PulseChain, it also mixes in other networks, so these
+        // PulseChain/HEX-ecosystem-only "dream" pricing tools stay hidden there).
+        function isPulseChainModeActive() {
+            return !combinedMode && selectedNetwork === 'pulsechain';
+        }
+
+        // Whether a given token/farm (as tagged by combined-mode loading) counts as PulseChain.
+        // Outside combined mode there's no per-item network tag — the single selected network
+        // applies to everything, so it's PulseChain-or-not based on that instead.
+        function isPulseChainItem(item) {
+            if (combinedMode) return item.network === 'pulsechain';
+            return selectedNetwork === 'pulsechain';
         }
 
         // -----------------------------------------------------------------
@@ -2855,6 +2819,7 @@
         const MANUAL_TOKENS_STORAGE_KEY = () => 'pulsefolio_manual_tokens' + portfolioSuffix();
         const MANUAL_MERGE_MODE_STORAGE_KEY = () => 'pulsefolio_manual_merge_mode' + portfolioSuffix();
         const WRAP_MERGE_STORAGE_KEY = () => 'pulsefolio_wrap_merge_enabled' + portfolioSuffix();
+        const HIDE_MANUAL_STORAGE_KEY = () => 'pulsefolio_hide_manual_tokens' + portfolioSuffix();
         const COINGECKO_ICONS_CACHE_KEY = 'pulsefolio_coingecko_icons_cache';
 
         function saveAddressesToStorage(addresses) {
@@ -3209,6 +3174,17 @@
         }
         let wrapMergeEnabled = loadWrapMergeFromStorage();
 
+        // Whether manually added tokens are hidden from the token list. Toggled from the
+        // small button next to the "Token" column header; off by default.
+        function loadHideManualFromStorage() {
+            try { return localStorage.getItem(HIDE_MANUAL_STORAGE_KEY()) === 'true'; }
+            catch (err) { return false; }
+        }
+        function saveHideManualToStorage(val) {
+            try { localStorage.setItem(HIDE_MANUAL_STORAGE_KEY(), val ? 'true' : 'false'); } catch (err) { console.warn(err); }
+        }
+        let hideManualTokens = loadHideManualFromStorage();
+
         // Tokens that should always be summed together into one row, since they represent
         // the same underlying asset (e.g. wrapped vs. native). Key = symbol to fold in,
         // value = canonical symbol it gets summed into.
@@ -3321,7 +3297,13 @@
             const baseTokens = portfolioData.tokens.map(t => ({ ...t }));
             const manualTokenObjects = [];
 
-            for (const mt of manualTokens) {
+            // When manual tokens are hidden, they're excluded entirely — not just hidden as a
+            // row, but also not folded into any matching on-chain token. An on-chain ETH
+            // balance should show its own real amount here, not one padded by a manual WETH
+            // that the person can't currently even see.
+            const activeManualTokens = hideManualTokens ? [] : manualTokens;
+
+            for (const mt of activeManualTokens) {
                 const style = tokenStyle(mt.symbol);
                 const usd = mt.amount * mt.price;
                 const change = mt.change24h ?? null;
@@ -3576,27 +3558,8 @@
             el.className = 'manual-token-msg';
         }
 
-        // =================================================================
-        //  WATCHLIST (CoinGecko, no wallet needed)
-        // =================================================================
-        const WATCHLIST_STORAGE_KEY = 'pulsefolio_watchlist';
-
-        function loadWatchlistFromStorage() {
-            try {
-                const raw = localStorage.getItem(WATCHLIST_STORAGE_KEY);
-                const parsed = raw ? JSON.parse(raw) : [];
-                return Array.isArray(parsed) ? parsed : [];
-            } catch { return []; }
-        }
-
-        function saveWatchlistToStorage(items) {
-            try { localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(items)); } catch (err) { console.warn(err); }
-        }
-
-        let watchlist = loadWatchlistFromStorage();
-        let lastCheckedWatchToken = null;
-
         // Batch price fetch — one request for every tracked coin instead of one per token.
+        // Used by the manual-token price refresh.
         async function fetchTokenPrices(coinIds) {
             if (!coinIds.length) return {};
             const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(coinIds.join(','))}&vs_currencies=usd&include_24hr_change=true`;
@@ -3613,184 +3576,6 @@
             }
             return map;
         }
-
-        function addToWatchlist(tokenData) {
-            const exists = watchlist.some(w => w.coingeckoId === tokenData.id);
-            if (exists) {
-                setWatchlistMsg(`${tokenData.symbol} is already on your watchlist.`, 'error');
-                return;
-            }
-            watchlist.push({
-                coingeckoId: tokenData.id,
-                symbol: tokenData.symbol.toUpperCase(),
-                name: tokenData.name || tokenData.symbol.toUpperCase(),
-                icon: tokenData.icon || null,
-                price: tokenData.price,
-                change24h: tokenData.change24h,
-                addedAt: Date.now(),
-            });
-            saveWatchlistToStorage(watchlist);
-            renderWatchlist();
-            setWatchlistMsg(`${tokenData.symbol} added to your watchlist.`, 'success');
-        }
-
-        function removeFromWatchlist(coingeckoId) {
-            watchlist = watchlist.filter(w => w.coingeckoId !== coingeckoId);
-            saveWatchlistToStorage(watchlist);
-            renderWatchlist();
-        }
-
-        function setWatchlistMsg(text, type) {
-            const el = document.getElementById('watchlistMsg');
-            el.textContent = text;
-            el.className = `manual-token-msg show${type ? ` ${type}` : ''}`;
-        }
-
-        function clearWatchlistMsg() {
-            const el = document.getElementById('watchlistMsg');
-            el.textContent = '';
-            el.className = 'manual-token-msg';
-        }
-
-        // Renders the current list and refreshes prices for everything tracked in one batch call.
-        async function renderWatchlist() {
-            const container = document.getElementById('watchlistItems');
-            const emptyHint = document.getElementById('watchlistEmptyHint');
-
-            if (!watchlist.length) {
-                container.innerHTML = '';
-                emptyHint.style.display = 'block';
-                return;
-            }
-            emptyHint.style.display = 'none';
-
-            const renderRows = () => {
-                container.innerHTML = watchlist.map(w => {
-                    const style = tokenStyle(w.symbol);
-                    const price = w.price ? formatPrice(w.price) : '—';
-                    const hasChange = w.change24h !== null && w.change24h !== undefined;
-                    const changeCls = hasChange ? (w.change24h >= 0 ? 'pos' : 'neg') : '';
-                    const changeText = hasChange ? fmtPct(w.change24h) : '—';
-                    return `
-                    <div class="row">
-                        <div class="icon" style="background: ${w.icon ? 'var(--surface-2)' : `linear-gradient(135deg, ${style.color1}, ${style.color2})`}; display: flex; align-items: center; justify-content: center;">${w.icon ? '' : escapeHtml(style.letter)}${iconImg(w.icon)}</div>
-                        <div class="row-info">
-                            <div class="row-name">${escapeHtml(w.symbol)}</div>
-                            <div class="row-sub">${escapeHtml(w.name)}</div>
-                        </div>
-                        <div class="row-right">
-                            <div class="row-amount">${price}</div>
-                            <div class="row-change ${changeCls}">${changeText}</div>
-                        </div>
-                        <button class="token-chip-remove" type="button" data-id="${escapeHtml(w.coingeckoId)}" style="margin-left:10px;" title="Remove ${escapeHtml(w.symbol)}" aria-label="Remove ${escapeHtml(w.symbol)}">×</button>
-                    </div>`;
-                }).join('');
-
-                container.querySelectorAll('.token-chip-remove').forEach(btn => {
-                    btn.addEventListener('click', () => removeFromWatchlist(btn.dataset.id));
-                });
-            };
-
-            renderRows(); // show cached prices immediately, then refresh in the background
-
-            try {
-                const priceMap = await fetchTokenPrices(watchlist.map(w => w.coingeckoId));
-                for (const w of watchlist) {
-                    const fresh = priceMap[w.coingeckoId];
-                    if (fresh && fresh.price !== null) {
-                        w.price = fresh.price;
-                        w.change24h = fresh.change24h;
-                    }
-                }
-                saveWatchlistToStorage(watchlist);
-                renderRows();
-            } catch (err) {
-                console.warn('Watchlist price refresh failed:', err.message);
-            }
-        }
-
-        async function handleWatchlistSearch() {
-            const input = document.getElementById('watchlistSymbolInput');
-            const btn = document.getElementById('watchlistSearchBtn');
-            const value = input.value.trim();
-
-            clearWatchlistMsg();
-            document.getElementById('watchlistPreview').classList.remove('show');
-            document.getElementById('watchlistAddRow').style.display = 'none';
-
-            if (!value) {
-                input.focus();
-                return;
-            }
-
-            btn.disabled = true;
-            btn.textContent = 'Searching…';
-
-            try {
-                const result = await searchTokenOnCoingecko(value);
-                lastCheckedWatchToken = result;
-
-                const wlIconEl = document.getElementById('wlIcon');
-                const style = tokenStyle(result.symbol);
-                if (result.icon) {
-                    wlIconEl.style.background = 'var(--surface-2)';
-                    wlIconEl.textContent = '';
-                    wlIconEl.innerHTML = iconImg(result.icon);
-                } else {
-                    wlIconEl.style.background = `linear-gradient(135deg, ${style.color1}, ${style.color2})`;
-                    wlIconEl.textContent = escapeHtml(result.symbol[0] || '?');
-                }
-                document.getElementById('wlName').textContent = result.name;
-                document.getElementById('wlSymbol').textContent = result.symbol;
-                document.getElementById('wlPrice').textContent = result.price ? formatPrice(result.price) : 'No price data';
-                const changeEl = document.getElementById('wlChange');
-                if (result.change24h !== null && result.change24h !== undefined) {
-                    changeEl.textContent = fmtPct(result.change24h);
-                    changeEl.className = `mt-change ${result.change24h >= 0 ? 'pos' : 'neg'}`;
-                } else {
-                    changeEl.textContent = '—';
-                    changeEl.className = 'mt-change';
-                }
-
-                document.getElementById('watchlistPreview').classList.add('show');
-                document.getElementById('watchlistAddRow').style.display = 'flex';
-            } catch (err) {
-                setWatchlistMsg(err.message, 'error');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Search';
-            }
-        }
-
-        function handleWatchlistAdd() {
-            if (!lastCheckedWatchToken) return;
-            addToWatchlist(lastCheckedWatchToken);
-            handleWatchlistCancel();
-        }
-
-        function handleWatchlistCancel() {
-            document.getElementById('watchlistPreview').classList.remove('show');
-            document.getElementById('watchlistAddRow').style.display = 'none';
-            document.getElementById('watchlistSymbolInput').value = '';
-            lastCheckedWatchToken = null;
-        }
-
-        document.getElementById('watchlistSearchBtn').addEventListener('click', handleWatchlistSearch);
-        document.getElementById('watchlistSymbolInput').addEventListener('keydown', e => {
-            if (e.key === 'Enter') handleWatchlistSearch();
-        });
-        document.getElementById('watchlistAddBtn').addEventListener('click', handleWatchlistAdd);
-        document.getElementById('watchlistCancelBtn').addEventListener('click', handleWatchlistCancel);
-
-        document.getElementById('watchlistNavBtn').addEventListener('click', () => {
-            document.getElementById('watchlistCard').classList.toggle('show');
-            renderWatchlist();
-        });
-        document.getElementById('closeWatchlistBtn').addEventListener('click', () => {
-            document.getElementById('watchlistCard').classList.remove('show');
-        });
-
-        renderWatchlist();
 
         // =================================================================
         //  FETCHING FUNCTIONS
@@ -4434,6 +4219,9 @@
         //  ATH / MULTIPLIER
         // =================================================================
         function applyAthPricing(data) {
+            // Unlike Multiplier, ATH Dream applies to *any* token with a defined ATH price —
+            // not just PulseChain ones. So in Combined mode, Ethereum-side tokens like ETH or
+            // USDC still get bumped to their all-time-high price if one is defined for them.
             const tokens = data.tokens.map(t => {
                 const usd = athAdjustedUsd(t.rawAmount, t.symbol, t.usd);
                 return { ...t, usd, isAth: getAthPrice(t.symbol) !== null, change: null };
@@ -4470,9 +4258,16 @@
         function applyMultiplierPricing(data, multiplier) {
             const m = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
 
-            const tokens = data.tokens.map(t => ({ ...t, usd: (t.usd || 0) * m, change: null }));
+            // Manually added tokens (exchange balances, off-chain holdings) aren't real
+            // on-chain PulseChain positions, so the "dream" multiplier skips them — but if a
+            // manual token got summed into a matching on-chain row (e.g. manual WETH folded
+            // into an on-chain ETH balance), that combined row still has a real on-chain
+            // component, so it's still fair game for the multiplier.
+            const tokens = data.tokens.map(t => (isPulseChainItem(t) && !t.manuallyAdded) ?
+                { ...t, usd: (t.usd || 0) * m, change: null } : { ...t });
 
             const farms = data.farms.map(f => {
+                if (!isPulseChainItem(f)) return { ...f };
                 if (Array.isArray(f.tokenParts) && f.tokenParts.length) {
                     const tokenParts = f.tokenParts.map(part => ({ ...part, usd: (part.usd || 0) * m }));
                     const principal = tokenParts.reduce((sum, p) => sum + (p.usd || 0), 0);
@@ -4681,7 +4476,8 @@
                 const cls = col === 'token' ? 'unsortable' : (isActive ? 'sortable active' : 'sortable');
                 if (col === 'token') {
                     const mergeBtn = `<button class="merge-toggle-btn ${wrapMergeEnabled ? 'active' : ''}" id="wrapMergeToggleBtn" type="button" title="${wrapMergeEnabled ? 'Wrapped tokens (e.g. WETH) are merged into their native token — click to split them apart' : 'Wrapped tokens are shown separately — click to merge them into their native token (e.g. WETH into ETH)'}">⇄</button>`;
-                    headerHtml += `<th class="${cls}"><span class="token-th-inner">${label}${mergeBtn}</span></th>`;
+                    const hideManualBtn = `<button class="merge-toggle-btn ${hideManualTokens ? 'active' : ''}" id="hideManualTokensBtn" type="button" title="${hideManualTokens ? 'Manually added tokens are hidden from this list — click to show them' : 'Hide manually added tokens from this list'}">🙈</button>`;
+                    headerHtml += `<th class="${cls}"><span class="token-th-inner">${label}${mergeBtn}${hideManualBtn}</span></th>`;
                 } else {
                     headerHtml += `<th class="${cls}" data-sort="${col}">${label}${arrow}</th>`;
                 }
@@ -4695,7 +4491,7 @@
                 let changeHtml;
                 if (athMode) {
                     changeHtml = t.isAth ? '<span class="value-change ath">ATH</span>' : '<span class="value-change">—</span>';
-                } else if (multiplierMode) {
+                } else if (multiplierMode && isPulseChainItem(t) && !t.manuallyAdded) {
                     changeHtml = `<span class="value-change multiplier">×${multiplierValue}</span>`;
                 } else {
                     if (t.change === null || t.change === undefined) {
@@ -4775,6 +4571,16 @@
                     refreshView();
                 });
             }
+
+            const hideManualBtn = document.getElementById('hideManualTokensBtn');
+            if (hideManualBtn) {
+                hideManualBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    hideManualTokens = !hideManualTokens;
+                    saveHideManualToStorage(hideManualTokens);
+                    refreshView();
+                });
+            }
         }
 
         function renderFarms(farms) {
@@ -4836,6 +4642,9 @@
         function refreshView() {
             const data = getEffectiveData();
 
+            let tokens = buildDisplayTokens(data, farmDisplayMode);
+            tokens = sortTokens(tokens);
+
             document.getElementById('summaryLabel').textContent = athMode ?
                 (lastAddressCount > 1 ? `ATH Dream value (${lastAddressCount} addresses)` : 'ATH Dream value') :
                 multiplierMode ?
@@ -4863,8 +4672,6 @@
             const hasFarmTokens = collectFarmTokenParts(data.farms).length > 0;
             document.getElementById('farmModeRow').classList.toggle('show', activeTab === 'tokens' && hasFarmTokens);
 
-            let tokens = buildDisplayTokens(data, farmDisplayMode);
-            tokens = sortTokens(tokens);
             renderTokens(tokens);
             renderFarms(data.farms);
         }
@@ -5129,6 +4936,24 @@
             syncChartVisibility();
         }
 
+        function syncAthDreamRowVisibility() {
+            const row = document.getElementById('athDreamRow');
+            if (!row) return;
+            const active = isPulseChainModeActive();
+            if (!active && (athMode || multiplierMode)) {
+                // Leaving PulseChain-relevant territory — turn these "dream" pricing modes
+                // off too, rather than leaving them silently active with no way to reach
+                // the toggle that turns them back off.
+                athMode = false;
+                multiplierMode = false;
+                document.getElementById('athDreamBtn').classList.remove('active');
+                document.getElementById('multiplierBtn').classList.remove('active');
+                document.getElementById('multiplierInputRow').classList.remove('show');
+            }
+            const summaryShown = document.getElementById('summary').classList.contains('show');
+            row.classList.toggle('show', active && summaryShown);
+        }
+
         function showResults(data, addressCount = 1, opts = {}) {
             portfolioData = data;
             lastAddressCount = addressCount;
@@ -5137,7 +4962,7 @@
             document.getElementById('notice').classList.add('show');
             document.getElementById('summary').classList.add('show');
             document.getElementById('tabs').classList.add('show');
-            document.getElementById('athDreamRow').classList.add('show');
+            syncAthDreamRowVisibility();
             setStaleBadge(showingStale ? 'loading' : 'hidden');
 
             refreshView();
@@ -5401,6 +5226,7 @@
             saveNetworkToStorage(selectedNetwork);
             saveCombinedModeToStorage(combinedMode);
             updateNetworkPill();
+            syncAthDreamRowVisibility();
             reloadForNetworkChange();
         }
 
@@ -5409,6 +5235,7 @@
             combinedMode = val;
             saveCombinedModeToStorage(combinedMode);
             updateNetworkPill();
+            syncAthDreamRowVisibility();
             reloadForNetworkChange();
         }
 
@@ -5842,6 +5669,8 @@
 
             wrapMergeEnabled = loadWrapMergeFromStorage();
 
+            hideManualTokens = loadHideManualFromStorage();
+
             const savedAddresses = loadAddressesFromStorage();
             if (savedAddresses && savedAddresses.length) {
                 resetAddrRows(savedAddresses[0]);
@@ -5904,6 +5733,7 @@
                 localStorage.removeItem(MANUAL_TOKENS_STORAGE_KEY());
                 localStorage.removeItem(MANUAL_MERGE_MODE_STORAGE_KEY());
                 localStorage.removeItem(WRAP_MERGE_STORAGE_KEY());
+                localStorage.removeItem(HIDE_MANUAL_STORAGE_KEY());
                 localStorage.removeItem(NETWORK_STORAGE_KEY());
                 localStorage.removeItem(COMBINED_MODE_STORAGE_KEY());
                 localStorage.removeItem(OTHER_NETWORKS_STORAGE_KEY());
