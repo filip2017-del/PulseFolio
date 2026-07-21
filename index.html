@@ -1324,10 +1324,24 @@
             font-size: clamp(18px, 2vw, 28px);
             color: var(--text-secondary);
         }
+        .p-change-label {
+            font-size: clamp(11px, 0.85vw, 13px);
+            color: var(--text-secondary);
+        }
+        .p-value-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 4px 12px;
+        }
+        .p-change-col {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
         .p-change {
             font-size: clamp(14px, 1.2vw, 18px);
             font-weight: 600;
-            margin-top: 4px;
         }
         .p-change.pos {
             color: var(--green);
@@ -2472,8 +2486,13 @@
                 </button>
             </div>
             <div class="stale-badge" id="staleBadge"><i class="ti ti-refresh" aria-hidden="true"></i> <span id="staleBadgeText" data-i18n="staleBadgeText">Cached data — refreshing…</span></div>
-            <div class="p-value currency-toggle" id="totalValue" title="Click to change currency" role="button" tabindex="0" data-i18n-title="currencyToggleTitle">$0</div>
-            <div class="p-change pos" id="totalChange">+0%</div>
+            <div class="p-value-row">
+                <div class="p-value currency-toggle" id="totalValue" title="Click to change currency" role="button" tabindex="0" data-i18n-title="currencyToggleTitle">$0</div>
+                <div class="p-change-col">
+                    <div class="p-change pos" id="totalChange">+$0 (+0%)</div>
+                    <div class="p-change-label" id="totalChangeLabel" data-i18n="portfolioChangeLabel">Portfolio change 24h</div>
+                </div>
+            </div>
 
             <div class="snapshot-chart" id="snapshotChart">
                 <div class="chart-range-row">
@@ -2953,6 +2972,19 @@
             return `${sign}${symbol}${abs.toFixed(decimals)}`;
         }
         const fmtPct = n => `${n >= 0 ? '+' : ''}${Number(n).toFixed(1)}%`;
+
+        const fmtSignedUSD = n => {
+            const valueInUsd = Number(n || 0);
+            const converted = convertPrice(valueInUsd, currentCurrency);
+            const sign = converted >= 0 ? '+' : '-';
+            const abs = Math.abs(converted);
+            const decimals = currentCurrency === 'btc' ? 8 : (abs >= 100 ? 0 : 2);
+            const formatted = abs.toLocaleString('en-US', {
+                minimumFractionDigits: decimals,
+                maximumFractionDigits: decimals
+            });
+            return `${sign}${currencySymbols[currentCurrency]}${formatted}`;
+        };
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
         function escapeHtml(value) {
@@ -5181,18 +5213,27 @@
             document.getElementById('totalValue').textContent = fmtUSD(data.totalUsd);
 
             const changeEl = document.getElementById('totalChange');
+            const changeLabelEl = document.getElementById('totalChangeLabel');
             if (athMode) {
+                changeLabelEl.style.display = 'none';
                 changeEl.textContent = t('athModeText');
                 changeEl.className = 'p-change ath';
             } else if (multiplierMode) {
+                changeLabelEl.style.display = 'none';
                 changeEl.textContent = t('multipliedText', { v: multiplierValue });
                 changeEl.className = 'p-change multiplier';
             } else if (data.weightedChange === null) {
+                changeLabelEl.style.display = 'none';
                 changeEl.textContent = '—';
                 changeEl.className = 'p-change';
             } else {
-                changeEl.textContent = fmtPct(data.weightedChange);
-                changeEl.className = `p-change ${data.weightedChange >= 0 ? 'pos' : 'neg'}`;
+                changeLabelEl.style.display = '';
+                changeLabelEl.textContent = t('portfolioChangeLabel');
+                const pct = data.weightedChange;
+                // Back out the absolute 24h change from the current total and the % change
+                const valueChangeUsd = data.totalUsd - (data.totalUsd / (1 + pct / 100));
+                changeEl.textContent = `${fmtSignedUSD(valueChangeUsd)} (${fmtPct(pct)})`;
+                changeEl.className = `p-change ${pct >= 0 ? 'pos' : 'neg'}`;
             }
 
             const activeTab = document.querySelector('.tab.active')?.dataset.tab || 'tokens';
@@ -6395,6 +6436,7 @@
                 wrapMergeTitleOff: 'Wrapped tokens are shown separately — click to merge them into their native token (e.g. WETH into ETH)',
                 hideManualTitleOn: 'Manually added tokens are hidden from this list — click to show them',
                 hideManualTitleOff: 'Hide manually added tokens from this list',
+                portfolioChangeLabel: 'Portfolio change 24h',
             },
             pl: {
                 settingsAria: 'Ustawienia',
@@ -6481,6 +6523,7 @@
                 wrapMergeTitleOff: 'Tokeny opakowane są pokazywane osobno — kliknij, aby scalić je z tokenem natywnym (np. WETH w ETH)',
                 hideManualTitleOn: 'Ręcznie dodane tokeny są ukryte na tej liście — kliknij, aby je pokazać',
                 hideManualTitleOff: 'Ukryj ręcznie dodane tokeny z tej listy',
+                portfolioChangeLabel: 'Zmiana portfela 24 h',
             },
         };
 
